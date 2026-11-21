@@ -1,17 +1,16 @@
-// A tiny static server for app/ (Node 22, standard library only), so an entry can be tried
-// locally without a build step: `node serve.ts` serves app/ on localhost:8080.
-// It sends the MIME types an offline web app needs, refuses any path outside app/, and otherwise
-// does nothing clever: this is a development convenience, not a web server for the internet.
-import { createReadStream, statSync } from 'node:fs';
+/**
+ * Minimal static file server for local preview.
+ * Serves ./app at http://127.0.0.1:8080 by default.
+ */
+import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('./app', import.meta.url)));
-const args = process.argv.slice(2);
-const portIndex = args.indexOf('--port');
-const requested = portIndex === -1 ? 8080 : Number(args[portIndex + 1]);
-const port = Number.isInteger(requested) && requested > 0 && requested < 65536 ? requested : 8080;
+const argPort = process.argv.indexOf('--port');
+const rawPort = argPort >= 0 ? Number(process.argv[argPort + 1]) : Number(process.env.PORT || 8080);
+const port = Number.isInteger(rawPort) && rawPort > 0 && rawPort < 65536 ? rawPort : 8080;
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -23,51 +22,53 @@ const MIME: Record<string, string> = {
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
-  '.webp': 'image/webp',
   '.svg': 'image/svg+xml',
+  '.webp': 'image/webp',
   '.ico': 'image/x-icon',
-  '.woff2': 'font/woff2',
-  '.woff': 'font/woff',
-  '.ttf': 'font/ttf',
-  '.otf': 'font/otf',
-  '.bin': 'application/octet-stream',
-  '.wasm': 'application/wasm',
-  '.wav': 'audio/wav',
-  '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg',
   '.txt': 'text/plain; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
 };
 
-createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http:' + '//localhost');
-  let pathname: string;
+function safePath(urlPath: string): string | null {
+  let decoded: string;
   try {
-    pathname = decodeURIComponent(url.pathname);
+    decoded = decodeURIComponent(urlPath);
   } catch {
-    response.writeHead(400).end('bad request');
-    return;
+    return null;
   }
+  const clean = normalize(decoded).replace(/^([/\\])+/, '');
+  const target = resolve(join(root, clean));
+  if (target !== root && !target.startsWith(root + sep)) return null;
+  return target;
+}
+
+const server = createServer((req, res) => {
+  const url = new URL(req.url || '/', 'http://127.0.0.1');
+  let pathname = url.pathname;
   if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
-  if (file !== root && !file.startsWith(root + sep)) {
-    response.writeHead(403).end('forbidden');
+  const file = safePath(pathname);
+  if (!file) {
+    res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
     return;
   }
-  let size: number;
-  try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
-  } catch {
-    response.writeHead(404).end('not found');
+
+  let target = file;
+  if (existsSync(target) && statSync(target).isDirectory()) {
+    target = join(target, 'index.html');
+  }
+  if (!existsSync(target) || !statSync(target).isFile()) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Not found');
     return;
   }
-  response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
-    'cache-control': 'no-store',
-  });
-  createReadStream(file).pipe(response);
-}).listen(port, '127.0.0.1', () => {
-  console.log(`app/ is on http:` + `//localhost:${port}`);
+
+  const type = MIME[extname(target).toLowerCase()] || 'application/octet-stream';
+  res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' });
+  createReadStream(target).pipe(res);
+});
+
+server.listen(port, '127.0.0.1', () => {
+  console.log(`Serving app at http://127.0.0.1:${port}`);
 });

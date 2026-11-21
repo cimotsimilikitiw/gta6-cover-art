@@ -1,33 +1,41 @@
-// Builds /output (the app/, the screenshots/ and the dossier.json this repo asks a host to score): a Node 22 script,
-// the standard library only, run as `node main.ts /output`. make.fun runs it at the repo root, in a
-// sandbox that only /output outlives; dossier.json is the one verifiable record (the sha256 and size of every file,
-// the text the grader reads, and a headless-browser peek at the rendered page).
-import { cpSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { buildDossier } from './vendor/makefun-app.ts';
+/**
+ * Build script: copies the static app and screenshots into the output directory,
+ * then writes dossier.json using the kit starter buildDossier contract.
+ *
+ * Usage:
+ *   node main.ts [outDir]
+ *   MAKEFUN_OUTPUT_DIR=out node main.ts
+ */
+import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildDossier } from '/home/adrioui/Projects/bounty/probes/kit-gta6-cover-art-01/gta6-cover-art-01-kit/starter/vendor/makefun-app.ts';
 
-const out = process.argv[2] ?? '/output';
-mkdirSync(out, { recursive: true });
-cpSync('app', join(out, 'app'), { recursive: true });
-cpSync('screenshots', join(out, 'screenshots'), { recursive: true });
+const here = fileURLToPath(new URL('.', import.meta.url));
+const outDir = resolve(process.argv[2] || process.env.MAKEFUN_OUTPUT_DIR || '/output');
+const appSrc = join(here, 'app');
+const shotsSrc = join(here, 'screenshots');
+const appDst = join(outDir, 'app');
+const shotsDst = join(outDir, 'screenshots');
 
-// Build a dossier.json manifest over the files the host copies (app/ and screenshots/, the whole of either; nothing
-// of either is read over the network).
-//
-// The dossier's text is a "## App" block (the source, vendored and asset counts and the totals) and then the
-// sources: index.html first, then the source scripts in importOrder's order (the page's classic scripts in document
-// order, then the module graph each enters in static-import, then dynamic-import, order, de-duplicated,
-// cycle-tolerant), then the rest of the app/ source files in byte order of path. Each is under "## <path>" in full,
-// or an omission line when it is over the per-source cap; a tail "… (N more app/ source files)" stands in when the
-// block reaches the whole-app text cap. That is the order a reader opens a front-end. An empty entry or a block over
-// the size bound is not scored.
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    app_max_files: 993,
-    app_max_bytes: 50331648,
-    app_path_max_bytes: 1000,
-  }),
-);
+mkdirSync(outDir, { recursive: true });
+
+rmSync(appDst, { recursive: true, force: true });
+cpSync(appSrc, appDst, { recursive: true });
+
+rmSync(shotsDst, { recursive: true, force: true });
+mkdirSync(shotsDst, { recursive: true });
+if (existsSync(shotsSrc)) {
+  cpSync(shotsSrc, shotsDst, { recursive: true });
+}
+
+const dossier = buildDossier(outDir, {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  app_max_files: 993,
+  app_max_bytes: 50331648,
+  app_path_max_bytes: 1000,
+});
+
+writeFileSync(join(outDir, 'dossier.json'), dossier);
+console.log(`Wrote ${join(outDir, 'dossier.json')} (${dossier.byteLength} bytes)`);
