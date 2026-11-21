@@ -13,20 +13,20 @@ import { buildDossier } from '/home/adrioui/Projects/bounty/probes/kit-gta6-cove
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const outDir = resolve(process.argv[2] || process.env.MAKEFUN_OUTPUT_DIR || '/output');
-const appSrc = join(here, 'app');
-const shotsSrc = join(here, 'screenshots');
-const appDst = join(outDir, 'app');
-const shotsDst = join(outDir, 'screenshots');
-
 mkdirSync(outDir, { recursive: true });
 
-rmSync(appDst, { recursive: true, force: true });
-cpSync(appSrc, appDst, { recursive: true });
+const copyTargets = [
+  { src: join(here, 'app'), dst: join(outDir, 'app'), required: true },
+  { src: join(here, 'screenshots'), dst: join(outDir, 'screenshots'), required: false },
+];
 
-rmSync(shotsDst, { recursive: true, force: true });
-mkdirSync(shotsDst, { recursive: true });
-if (existsSync(shotsSrc)) {
-  cpSync(shotsSrc, shotsDst, { recursive: true });
+for (const { src, dst, required } of copyTargets) {
+  rmSync(dst, { recursive: true, force: true });
+  if (!required && !existsSync(src)) {
+    mkdirSync(dst, { recursive: true });
+    continue;
+  }
+  cpSync(src, dst, { recursive: true });
 }
 
 const dossier = buildDossier(outDir, {
